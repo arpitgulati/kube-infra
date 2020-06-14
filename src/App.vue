@@ -10,8 +10,8 @@ export default {
   data() {
     return {
       user: {
-        firstName: 'Harry',
-        lastName: 'Manchanda'
+        firstName: 'Arpit',
+        lastName: 'Gulati'
       }
     };
   },
