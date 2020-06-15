@@ -1,0 +1,5 @@
+http://54.174.174.129:30291/ ------ Jenkin Url , where you can see the job 
+
+http://54.174.174.129:31821/ ------  Vue App running
+
+http://nv-alb-dev-2112738728.us-east-1.elb.amazonaws.com/ ----- Vue App loadbalancer DNS
