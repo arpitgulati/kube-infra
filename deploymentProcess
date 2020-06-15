@@ -1,0 +1,164 @@
+			Deployment  Process on kubernetes 
+
+Note: Assuming you have already created the Kubernetes setup
+
+1. Create a jenkins image using below Dockerfile . This need to be done because Jenkins need docker plugin to build and an image .
+
+Dockerfile for Jenkins:
+
+FROM jenkins/jenkins:lts
+USER root
+RUN apt-get update && \
+    apt-get -y --no-install-recommends install apt-transport-https \
+      ca-certificates \
+      curl \
+      gnupg2 \
+      software-properties-common && \
+    curl -fsSL https://download.docker.com/linux/$(. /etc/os-release; echo "$ID")/gpg > /tmp/dkey; apt-key add /tmp/dkey && \
+    add-apt-repository \
+      "deb [arch=amd64] https://download.docker.com/linux/$(. /etc/os-release; echo "$ID") \
+      $(lsb_release -cs) \
+      stable" && \
+   apt-get update && \
+   apt-get -y --no-install-recommends install docker-ce && \
+   apt-get clean && \
+   usermod -aG docker jenkins
+USER jenkins
+
+Build an jenkins image , push to ECR or docker hub (first login to docker registry and then run docker push jenkin_image)
+
+
+2. Go to master node of kube cluster (if kube context is not on your local machine)
+Create a secret.yaml in which your aws credentails will be there in base 64 encode format.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vue-creds-ecr
+  namespace: default
+  labels:
+    app: vue-creds
+    #    kubernetes.io/minikube-addons: registry-creds
+    cloud: ecr
+data:
+  AWS_ACCESS_KEY_ID: 4oCcQUtJQVVVMjVWVFJXQ1hTUU40Nk/igJ0=
+  AWS_SECRET_ACCESS_KEY: 4oCcV0lUVnZyWTFlWDZ2TWUzb0FiUWF5d1Z2QnZTQ2VIS2h3M2U3NTVpTeKAnQ==
+  aws-account: 4oCcMzE5NjM0NjQ0MDc24oCd
+  aws-region: 4oCcdXMtZWFzdC0x4oCd
+type: Opaque
+
+Run kubectl apply -f secret.yaml 
+
+3.  Go to master node of kube cluster (if kube context is not on your local machine)
+      vim jenkins.yaml, copy and paste the below lines
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: jenkins-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jenkins
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      serviceAccountName: jenkins
+      containers:
+      - name: jenkins
+        image: 319634644076.dkr.ecr.us-east-1.amazonaws.com/jenkin:latest
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+          - name: jenkins-home
+            mountPath: /var/jenkins_home
+          - name: dockersock
+            mountPath: "/var/run/docker.sock"  #mount docker.sock to jenkin container 
+      volumes:
+         - name: jenkins-home
+           emptyDir: {}
+         - name: dockersock
+           hostPath:
+             path: /var/run/docker.sock
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30291
+  selector:
+    app: jenkins
+
+Run kubectl apply -f jenkins.yaml
+Run chmod 666 /var/run/docker.sock on worker node  #Important step
+
+open jenkins on browser using publicip:30291
+Install kubernetes ,ecr plugin in jenkins , manage jenkins => manage plugins 
+
+ 
+4. Add credentails AWS access and secret key and kube config so that your jenkin can connect to AWS ECR and kubernetes cluster. 
+
+Jenkin=> credentails => jenkins => Global credentials => Add credentails
+
+Select the kind  kubernetes Service configuration for kubernetes and AWS credentails for AWS . 
+
+5. Create a job , kube-infra , select pipeline . Go to configure
+     At the last pipeline section paste
+
+pipeline {
+  environment {
+    IM = '319634644076.dkr.ecr.us-east-1.amazonaws.com/vueapp'
+    ECRURL = 'https://319634644076.dkr.ecr.us-east-1.amazonaws.com/vueapp'
+    ECRCRED = 'ecr:us-east-1:aws_cred'
+    VERSION = "${env.BUILD_NUMBER}"
+    IMAGE="$IM:$VERSION"
+
+  }
+  agent any
+  stages {
+    stage('Cloning Git') {
+      steps {
+        git 'https://github.com/arpitgulati/kube-infra.git'
+      }
+    }
+    stage('Building image') {
+      steps{
+        script {
+          sh 'docker build --no-cache -t $IM:$VERSION .'
+        }
+      }
+    }
+    stage('Deploy Image') {
+      steps{
+        script {
+          docker.withRegistry(ECRURL, ECRCRED) {
+            docker.image(IMAGE).push()
+          }
+        }
+      }
+    }
+    stage('Deploy Vue App') {
+      steps{
+        script {
+          sh "sed -i 's/latest/$VERSION/g' deployment.yaml"
+          kubernetesDeploy(configs: "deployment.yaml", kubeconfigId: "kubeconfig")  #kubeconfig is the id that I give in credentail section of jenkins (when I creating kube )
+        }
+      }
+    }
+  }
+}
+
+Save and run the job .
+
+Alternative .
+
+Commit the jenkinsfile on github and at last section Pipeline , select defination pipeline script from scm. Before that enter git url on above section .
