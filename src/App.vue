@@ -1,6 +1,6 @@
 <template>
   <div id="app">
-    <h1> Hello, {{ formatName(user) }}! </h1>
+    <h1> welcome, {{ formatName(user) }}! </h1>
   </div>
 </template>
 
